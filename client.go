@@ -8,7 +8,6 @@ package sshclient
 import (
 	"bytes"
 	"code.google.com/p/go.crypto/ssh"
-	"fmt"
 	"log"
 	"time"
 )
@@ -65,8 +64,7 @@ func exec(server, username, password, cmd string, c chan Results) {
 		log.Fatalf("request for pseudo terminal failed: %s", err)
 	}
 
-	var stdout,stderr bytes.Buffer
-	//var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 	rc := 0
@@ -85,10 +83,10 @@ func Exec(server, username, password, cmd string, timeout int) (int, string, str
 	for {
 		select {
 		case r = <-c:
-	        return r.rc, r.stdout, r.stderr
+			return r.rc, r.stdout, r.stderr
 		case <-time.After(time.Duration(timeout) * time.Second):
-			fmt.Println("You're too slow.")
-			return -1,"",""
+            // TODO: a panic might be appropriate here
+			return -1, "", ""
 		}
 
 	}
