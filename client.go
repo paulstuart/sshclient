@@ -8,7 +8,8 @@ package sshclient
 import (
 	"bytes"
 	"code.google.com/p/go.crypto/ssh"
-	"log"
+    "errors"
+	"fmt"
 	"time"
 )
 
@@ -19,9 +20,10 @@ func (p clientPassword) Password(user string) (string, error) {
 }
 
 type Results struct {
-	rc     int
-	stdout string
-	stderr string
+    err     error
+	rc      int
+	stdout  string
+	stderr  string
 }
 
 func exec(server, username, password, cmd string, c chan Results) {
@@ -39,7 +41,9 @@ func exec(server, username, password, cmd string, c chan Results) {
 	}
 	client, err := ssh.Dial("tcp", server, config)
 	if err != nil {
-		panic("Failed to dial: " + err.Error())
+        //panic("Failed to dial: " + err.Error())
+        c <- Results{err:err}
+        return
 	}
 
 	// Each ClientConn can support multiple interactive sessions,
@@ -49,7 +53,8 @@ func exec(server, username, password, cmd string, c chan Results) {
 	// Create a session
 	session, err := client.NewSession()
 	if err != nil {
-		log.Fatalf("unable to create session: %s", err)
+        c <- Results{err:err}
+        return
 	}
 	defer session.Close()
 
@@ -61,7 +66,9 @@ func exec(server, username, password, cmd string, c chan Results) {
 	}
 	// Request pseudo terminal
 	if err := session.RequestPty("xterm", 80, 40, modes); err != nil {
-		log.Fatalf("request for pseudo terminal failed: %s", err)
+		//panic("request for pseudo terminal failed: " + err.Error())
+        c <- Results{err:err}
+        return
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -73,21 +80,28 @@ func exec(server, username, password, cmd string, c chan Results) {
 			rc = ugh.Waitmsg.ExitStatus()
 		}
 	}
-	c <- Results{rc, stdout.String(), stderr.String()}
+	c <- Results{nil, rc, stdout.String(), stderr.String()}
 }
 
-func Exec(server, username, password, cmd string, timeout int) (int, string, string) {
+
+func Exec(server, username, password, cmd string, timeout int) (err error, rc int, stdout, stderr string) {
 	c := make(chan Results)
+    defer func() {
+        fmt.Println("the deferred ssh for host: ", server)
+		if r := recover(); r != nil {
+			fmt.Println("Recovered here", r)
+		}
+    }()
 	go exec(server, username, password, cmd, c)
 	var r Results
 	for {
 		select {
 		case r = <-c:
-			return r.rc, r.stdout, r.stderr
+			err,rc,stdout,stderr = r.err, r.rc, r.stdout, r.stderr
+			return 
 		case <-time.After(time.Duration(timeout) * time.Second):
-            // TODO: a panic might be appropriate here
-			return -1, "", ""
+            err = errors.New(fmt.Sprintf("Timed out after %s seconds", timeout))
+			return 
 		}
-
 	}
 }
