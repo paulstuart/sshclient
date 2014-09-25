@@ -7,10 +7,11 @@ package sshclient
 
 import (
 	"bytes"
-	"code.google.com/p/go.crypto/ssh"
 	"errors"
 	"fmt"
 	"time"
+
+	"code.google.com/p/go.crypto/ssh"
 )
 
 type clientPassword string
@@ -33,15 +34,15 @@ func exec(server, username, password, cmd string, c chan Results) {
 
 	config := &ssh.ClientConfig{
 		User: username,
-		Auth: []ssh.ClientAuth{
+		Auth: []ssh.AuthMethod{
 			// ClientAuthPassword wraps a ClientPassword implementation
 			// in a type that implements ClientAuth.
-			ssh.ClientAuthPassword(clientPassword(password)),
+			ssh.Password(password),
 		},
 	}
 	client, err := ssh.Dial("tcp", server, config)
 	if err != nil {
-		err = errors.New("Failed to dial: " + err.Error())
+	//	err = errors.New("Failed to dial: " + err.Error())
 		c <- Results{err: err}
 		return
 	}
@@ -93,7 +94,7 @@ func Exec(server, username, password, cmd string, timeout int) (err error, rc in
 			err, rc, stdout, stderr = r.err, r.rc, r.stdout, r.stderr
 			return
 		case <-time.After(time.Duration(timeout) * time.Second):
-			err = errors.New(fmt.Sprintf("Timed out after %s seconds", timeout))
+			err = errors.New(fmt.Sprintf("Timed out after %d seconds", timeout))
 			return
 		}
 	}
