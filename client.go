@@ -11,7 +11,7 @@ import (
 	"net"
 	"time"
 
-	"code.google.com/p/go.crypto/ssh"
+    "golang.org/x/crypto/ssh"
 )
 
 const (
@@ -90,10 +90,10 @@ func Run(client *ssh.Client, cmd string) Results {
 func Exec(server, username, password, cmd string, timeout int) (rc int, stdout, stderr string, err error) {
     var client *ssh.Client
     client, err = DialPassword(server, username, password, timeout)
-    defer client.Close()
     if err != nil {
         return
     }
+    defer client.Close()
 
 	c := make(chan Results)
 	go func() {
