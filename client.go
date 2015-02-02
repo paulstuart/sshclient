@@ -8,10 +8,11 @@ package sshclient
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"time"
 
-    "golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -31,18 +32,48 @@ type Results struct {
 	stderr string
 }
 
-func DialPassword(server, username, password string, timeout int) (*ssh.Client, error) {
-	// To authenticate with the remote server you must pass at least one
-	// implementation of ClientAuth via the Auth field in ClientConfig.
-	// Currently only the "password" authentication method is supported.
+type keychain struct {
+	keys []ssh.Signer
+}
 
+func (k *keychain) PrivateKey(file string) error {
+	buf, err := ioutil.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	key, err := ssh.ParsePrivateKey(buf)
+	if err != nil {
+		return err
+	}
+	k.keys = append(k.keys, key)
+	return nil
+}
+
+func KeyAuth(file string) (ssh.AuthMethod, error) {
+	k := new(keychain)
+	err := k.PrivateKey(file)
+	if err != nil {
+		return nil, err
+	}
+	return ssh.PublicKeys(k.keys...), nil
+}
+
+func DialKey(server, username, keyfile string, timeout int) (*ssh.Client, error) {
+	keyauth, err := KeyAuth(keyfile)
+	if err != nil {
+		return nil, err
+	}
+	return DialSsh(server, username, timeout, keyauth)
+}
+
+func DialPassword(server, username, password string, timeout int) (*ssh.Client, error) {
+	return DialSsh(server, username, timeout, ssh.Password(password))
+}
+
+func DialSsh(server, username string, timeout int, auth ...ssh.AuthMethod) (*ssh.Client, error) {
 	config := &ssh.ClientConfig{
 		User: username,
-		Auth: []ssh.AuthMethod{
-			// ClientAuthPassword wraps a ClientPassword implementation
-			// in a type that implements ClientAuth.
-			ssh.Password(password),
-		},
+		Auth: auth,
 	}
 	conn, err := net.DialTimeout("tcp", server, time.Duration(timeout)*time.Second)
 	if err != nil {
@@ -86,19 +117,18 @@ func Run(client *ssh.Client, cmd string) Results {
 	return Results{nil, rc, stdout.String(), stderr.String()}
 }
 
-
 func Exec(server, username, password, cmd string, timeout int) (rc int, stdout, stderr string, err error) {
-    var client *ssh.Client
-    client, err = DialPassword(server, username, password, timeout)
-    if err != nil {
-        return
-    }
-    defer client.Close()
+	var client *ssh.Client
+	client, err = DialPassword(server, username, password, timeout)
+	if err != nil {
+		return
+	}
+	defer client.Close()
 
 	c := make(chan Results)
 	go func() {
-        c <- Run(client, cmd)
-    }()
+		c <- Run(client, cmd)
+	}()
 
 	for {
 		select {
