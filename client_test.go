@@ -48,7 +48,7 @@ func TestSshKey(t *testing.T) {
 	}
 	cmd := "uptime"
 	r := Run(client, cmd)
-	if r.err != nil {
+	if r.Err != nil {
 		t.Fatal("keyauth run error:", err)
 	}
 }
@@ -60,11 +60,11 @@ func TestSshKeyauth(t *testing.T) {
 	}
 	cmd := "logname"
 	r := Run(client, cmd)
-	if r.err != nil {
+	if r.Err != nil {
 		t.Fatal("keyauth run error:", err)
 	}
-	if strings.TrimSpace(r.stdout) != username {
-		t.Fatal("keyauth command failed. expected", username, "got", r.stdout)
+	if strings.TrimSpace(r.Stdout) != username {
+		t.Fatal("keyauth command failed. expected", username, "got", r.Stdout)
 	}
 }
 
@@ -81,6 +81,18 @@ func TestSshClient(t *testing.T) {
 		t.Error("ssh execution error:", stderr)
 	} else {
 		t.Log("client returned:", stdout)
+	}
+}
+
+func TestSshStderr(t *testing.T) {
+	cmd := "lsX"
+	timeout := 5
+	_, stdout, stderr, _ := Exec(host, username, password, cmd, timeout)
+	if len(stdout) > 0 {
+		t.Log("ssh stdout", stdout)
+	}
+	if len(stderr) > 0 {
+		t.Log("ssh stderr:", stderr)
 	}
 }
 
