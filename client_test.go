@@ -36,13 +36,13 @@ func init() {
 	}
 }
 
-func TestSshKey(t *testing.T) {
+func TestSSHKey(t *testing.T) {
 	var err error
 	keyauth, err = KeyAuth(keyfile)
 	if err != nil {
 		t.Fatal("keyauth error:", err)
 	}
-	client, err := DialSsh(host, username, 5, keyauth)
+	client, err := DialSSH(host, username, 5, keyauth)
 	if err != nil {
 		t.Fatal("keyauth dial error:", err)
 	}
@@ -53,7 +53,7 @@ func TestSshKey(t *testing.T) {
 	}
 }
 
-func TestSshKeyauth(t *testing.T) {
+func TestSSHKeyauth(t *testing.T) {
 	client, err := DialKey(host, username, keyfile, 5)
 	if err != nil {
 		t.Fatal("keyauth dial error:", err)
@@ -68,7 +68,7 @@ func TestSshKeyauth(t *testing.T) {
 	}
 }
 
-func TestSshClient(t *testing.T) {
+func TestSSHClient(t *testing.T) {
 	cmd := "hostname"
 	timeout := 5
 	rc, stdout, stderr, err := Exec(host, username, password, cmd, timeout)
@@ -84,7 +84,7 @@ func TestSshClient(t *testing.T) {
 	}
 }
 
-func TestSshStderr(t *testing.T) {
+func TestSSHStderr(t *testing.T) {
 	cmd := "lsX"
 	timeout := 5
 	_, stdout, stderr, _ := Exec(host, username, password, cmd, timeout)
@@ -96,7 +96,7 @@ func TestSshStderr(t *testing.T) {
 	}
 }
 
-func TestSshTimeout(t *testing.T) {
+func TestSSHTimeout(t *testing.T) {
 	cmd := "sleep 10"
 	timeout := 5
 	rc, _, stderr, err := Exec(host, username, password, cmd, timeout)

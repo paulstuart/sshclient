@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -96,17 +97,20 @@ func DialKey(server, username, keyfile string, timeout int) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return DialSsh(server, username, timeout, keyauth)
+	return DialSSH(server, username, timeout, keyauth)
 }
 
 func DialPassword(server, username, password string, timeout int) (*Session, error) {
-	return DialSsh(server, username, timeout, ssh.Password(password))
+	return DialSSH(server, username, timeout, ssh.Password(password))
 }
 
-func DialSsh(server, username string, timeout int, auth ...ssh.AuthMethod) (*Session, error) {
+func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Session, error) {
 	config := &ssh.ClientConfig{
 		User: username,
 		Auth: auth,
+	}
+	if strings.Index(server, ":") < 0 {
+		server += ":22"
 	}
 	conn, err := net.DialTimeout("tcp", server, time.Duration(timeout)*time.Second)
 	if err != nil {
