@@ -6,13 +6,14 @@ package sshclient
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"net"
+	"os"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 const (
@@ -25,9 +26,8 @@ func (p clientPassword) Password(user string) (string, error) {
 	return string(p), nil
 }
 
-// Results comprises all info resulting from running a command via ssh
+// Results comprises the results from running a command via ssh
 type Results struct {
-	Err    error  // internal or communication errors
 	RC     int    // the result code of the command itself
 	Stdout string // stdout from the command
 	Stderr string // stderr from the command
@@ -96,7 +96,7 @@ func keyFileAuth(file string) (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(k.keys...), nil
 }
 
-//DialKey will open an ssh session using an key key
+//DialKey will open an ssh session using a private key
 func DialKey(server, username, key string, timeout int) (*Session, error) {
 	auth, err := keyAuth(key)
 	if err != nil {
@@ -119,16 +119,35 @@ func DialPassword(server, username, password string, timeout int) (*Session, err
 	return DialSSH(server, username, timeout, ssh.Password(password))
 }
 
-//DialSSH will open an ssh session using the specified authentication
-func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Session, error) {
-	config := &ssh.ClientConfig{
-		User: username,
-		Auth: auth,
+// DialAgent makes a ssh connection with credentials from ssh-agent
+func DialAgent(server, username string, timeout int) (*Session, error) {
+	socket := os.Getenv("SSH_AUTH_SOCK")
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return nil, err
 	}
+
+	agentClient := agent.NewClient(conn)
+	config := &ssh.ClientConfig{
+		User:    username,
+		Timeout: time.Duration(timeout) * time.Second,
+		Auth: []ssh.AuthMethod{
+			// Use a callback rather than PublicKeys so we only consult the
+			// agent once the remote server wants it.
+			ssh.PublicKeysCallback(agentClient.Signers),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: make this secure
+	}
+
+	return DialConfigSSH(server, username, config)
+}
+
+//DialConfigSSH will open an ssh session using the given config
+func DialConfigSSH(server, username string, config *ssh.ClientConfig) (*Session, error) {
 	if strings.Index(server, ":") < 0 {
 		server += ":22"
 	}
-	conn, err := net.DialTimeout("tcp", server, time.Duration(timeout)*time.Second)
+	conn, err := net.DialTimeout("tcp", server, config.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +157,20 @@ func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Ses
 		return nil, err
 	}
 	return NewSession(ssh.NewClient(c, chans, reqs))
+}
+
+//DialSSH will open an ssh session using the specified authentication
+func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Session, error) {
+	if len(auth) == 0 {
+		panic("no auth!")
+	}
+	config := &ssh.ClientConfig{
+		User:            username,
+		Auth:            auth,
+		Timeout:         time.Duration(timeout) * time.Second,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // TODO: find cleaner way for this
+	}
+	return DialConfigSSH(server, username, config)
 }
 
 // NewSession will open an ssh session using the provided connection
@@ -167,7 +200,7 @@ func NewSession(client *ssh.Client) (*Session, error) {
 }
 
 // Run will run a command in the session
-func Run(session *Session, cmd string) Results {
+func Run(session *Session, cmd string) (Results, error) {
 	var rc int
 	var err error
 	if err = session.ssh.Run(cmd); err != nil {
@@ -175,45 +208,32 @@ func Run(session *Session, cmd string) Results {
 			rc = err2.Waitmsg.ExitStatus()
 		}
 	}
-	return Results{err, rc, session.out.String(), session.err.String()}
-}
-
-func exec(session *Session, cmd string, timeout int) (rc int, stdout, stderr string, err error) {
-	defer session.Close()
-
-	c := make(chan Results)
-	go func() {
-		c <- Run(session, cmd)
-	}()
-
-	for {
-		select {
-		case r := <-c:
-			err, rc, stdout, stderr = r.Err, r.RC, r.Stdout, r.Stderr
-			return
-		case <-time.After(time.Duration(timeout) * time.Second):
-			err = fmt.Errorf("Command timed out after %d seconds", timeout)
-			return
-		}
-	}
+	return Results{rc, session.out.String(), session.err.String()}, err
 }
 
 // ExecPassword will run a single command using the given password
-func ExecPassword(server, username, password, cmd string, timeout int) (rc int, stdout, stderr string, err error) {
-	var session *Session
-	session, err = DialPassword(server, username, password, timeout)
+func ExecPassword(server, username, password, cmd string, timeout int) (Results, error) {
+	session, err := DialPassword(server, username, password, timeout)
 	if err != nil {
-		return
+		return Results{}, err
 	}
-	return exec(session, cmd, timeout)
+	return Run(session, cmd)
 }
 
 // ExecText will run a single command using the given key
-func ExecText(server, username, keytext, cmd string, timeout int) (rc int, stdout, stderr string, err error) {
-	var session *Session
-	session, err = DialKey(server, username, keytext, timeout)
+func ExecText(server, username, keytext, cmd string, timeout int) (Results, error) {
+	session, err := DialKey(server, username, keytext, timeout)
 	if err != nil {
-		return
+		return Results{}, err
 	}
-	return exec(session, cmd, timeout)
+	return Run(session, cmd)
+}
+
+// ExecAgent will run a single command using ssh-agent
+func ExecAgent(server, username, cmd string, timeout int) (Results, error) {
+	session, err := DialAgent(server, username, timeout)
+	if err != nil {
+		return Results{}, err
+	}
+	return Run(session, cmd)
 }
