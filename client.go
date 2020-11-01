@@ -6,6 +6,8 @@ package sshclient
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"net"
 	"os"
@@ -19,12 +21,6 @@ import (
 const (
 	termType = "xterm"
 )
-
-type clientPassword string
-
-func (p clientPassword) Password(user string) (string, error) {
-	return string(p), nil
-}
 
 // Results comprises the results from running a command via ssh
 type Results struct {
@@ -144,7 +140,7 @@ func DialAgent(server, username string, timeout int) (*Session, error) {
 
 //DialConfigSSH will open an ssh session using the given config
 func DialConfigSSH(server, username string, config *ssh.ClientConfig) (*Session, error) {
-	if strings.Index(server, ":") < 0 {
+	if !strings.Contains(server, ":") {
 		server += ":22"
 	}
 	conn, err := net.DialTimeout("tcp", server, config.Timeout)
@@ -182,6 +178,16 @@ func NewSession(client *ssh.Client) (*Session, error) {
 
 	s := &Session{ssh: session, client: client}
 
+	return s, nil
+}
+
+// Buffered insures that command output is captured
+func (s *Session) Buffered() {
+	s.ssh.Stdout = &s.out
+	s.ssh.Stderr = &s.err
+}
+
+func (s *Session) Terminal() error {
 	// Set up terminal modes
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          0,      // disable echoing
@@ -189,14 +195,11 @@ func NewSession(client *ssh.Client) (*Session, error) {
 		ssh.TTY_OP_OSPEED: 115200, // output speed = 115.2kbps
 	}
 	// Request pseudo terminal
-	if err := session.RequestPty(termType, 80, 40, modes); err != nil {
-		client.Close()
-		return nil, err
+	if err := s.ssh.RequestPty(termType, 80, 40, modes); err != nil {
+		s.client.Close()
+		return err
 	}
-
-	session.Stdout = &s.out
-	session.Stderr = &s.err
-	return s, nil
+	return nil
 }
 
 // Run will run a command in the session
@@ -236,4 +239,80 @@ func ExecAgent(server, username, cmd string, timeout int) (Results, error) {
 		return Results{}, err
 	}
 	return Run(session, cmd)
+}
+
+// CopyFile scp's filename to dest on the remote host
+func (s *Session) CopyFile(filename, dest string) error {
+	info, err := os.Stat(filename)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return s.Copy(f, filename, dest, info.Size(), info.Mode())
+}
+
+// Copy scp's the reader contents named filename to dest on the remote host
+func (s *Session) Copy(r io.Reader, filename, destination string, size int64, mode os.FileMode) error {
+	w, err := s.ssh.StdinPipe()
+	if err != nil {
+		return err
+	}
+
+	// capture stderr
+	s.Buffered()
+
+	cmd := fmt.Sprintf("/usr/bin/env scp -tq %s", destination)
+	if err := s.ssh.Start(cmd); err != nil {
+		w.Close()
+		return err
+	}
+
+	errors := make(chan error)
+
+	go func() {
+		errors <- s.ssh.Wait()
+	}()
+
+	// send the SCP Create command
+	fmt.Fprintf(w, "C%#o %d %s\n", mode, size, filename)
+	if _, err := io.Copy(w, r); err != nil {
+		w.Close()
+		return fmt.Errorf("copy error: %w", err)
+	}
+	// send end of command marker
+	fmt.Fprint(w, "\x00")
+	w.Close()
+
+	err = <-errors
+	//int rc
+	if err == nil {
+		return nil
+	}
+
+	// get more details about the error
+	if serr, ok := err.(*ssh.ExitError); ok {
+		rc := serr.Waitmsg.ExitStatus()
+		stderr := s.err.String()
+		stdout := s.out.String()
+		// scp errors start with a null byte and are separated by "markers",
+		// values 0, 1, 2 -- for ok, warning, error (respectively)
+		// I believe we only care about the first line
+		if len(stdout) > 2 {
+			b := []byte(stdout)
+			// skip the leading 0
+			b = b[1:]
+			fn := func(c rune) bool {
+				return c < 3
+			}
+			parts := bytes.FieldsFunc(b, fn)
+			stdout = string(parts[0])
+			stdout = strings.TrimRight(stdout, "\n")
+		}
+		err = fmt.Errorf("rc:%d stdout:%q stderr:%q error:%w", rc, stdout, stderr, serr)
+	}
+	return err
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 Paul Stuart. All rights reserved.
+// Copyright 2016-2020 Paul Stuart. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -14,6 +14,7 @@ var (
 	host, username, password, keyfile, keytext string
 )
 
+// Using envs to avoid accidentally baking creds into code
 func init() {
 	host = os.Getenv("SSH_HOST")
 	if len(host) == 0 {
@@ -78,17 +79,23 @@ func TestSSHKeyFileAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal("keyfile auth dial error:", err)
 	}
+	client.Buffered()
+	_ = client.Terminal()
 	cmd := "logname"
 	r, err := Run(client, cmd)
 	if err != nil {
 		t.Fatal("keyfile auth run error:", err)
 	}
+	if r.Stderr != "" {
+		t.Log(r.Stderr)
+	}
 	if strings.TrimSpace(r.Stdout) != username {
-		t.Fatal("keyfile auth command failed. expected", username, "got", r.Stdout)
+		t.Fatalf("want: %q -- got: %q", username, r.Stdout)
 	}
 }
 
 func TestSSHClient(t *testing.T) {
+	t.Skip("need test ssh server")
 	cmd := "hostname"
 	timeout := 5
 	r, err := ExecPassword(host, username, password, cmd, timeout)
@@ -127,5 +134,22 @@ func TestSSHTimeout(t *testing.T) {
 		t.Error("ssh execution error:", r.Stderr)
 	} else if len(r.Stderr) > 0 {
 		t.Error("ssh execution error:", r.Stderr)
+	}
+}
+
+// TODO: makr this test (and others) self contained with a test ssh server
+const (
+	scpTestFile = "_TESTING_SCP_.txt"
+	scpTestDir  = "/tmp/foo"
+)
+
+func TestSCP(t *testing.T) {
+	s, err := DialKeyFile(host, username, keyfile, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.CopyFile(scpTestFile, scpTestDir)
+	if err != nil {
+		t.Fatal("copy error:", err)
 	}
 }
