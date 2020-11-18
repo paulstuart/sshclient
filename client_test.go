@@ -94,6 +94,23 @@ func TestSSHKeyFileAuth(t *testing.T) {
 	}
 }
 
+func TestSSHAgent(t *testing.T) {
+	client, err := DialAgent(host, username, 5)
+	if err != nil {
+		t.Fatal("agent dial error:", err)
+	}
+	client.Buffered()
+
+	cmd := "logname"
+	r, err := Run(client, cmd)
+	if err != nil {
+		t.Fatal("key auth run error:", err)
+	}
+	if strings.TrimSpace(r.Stdout) != username {
+		t.Fatal("ssh-agent command failed. expected", username, "got", r.Stdout)
+	}
+}
+
 func TestSSHClient(t *testing.T) {
 	t.Skip("need test ssh server")
 	cmd := "hostname"

@@ -18,15 +18,21 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-const (
-	termType = "xterm"
-)
-
 // Results comprises the results from running a command via ssh
 type Results struct {
 	RC     int    // the result code of the command itself
 	Stdout string // stdout from the command
 	Stderr string // stderr from the command
+}
+
+type CmdError struct {
+	RC     int
+	Stdout string
+	Stderr string
+}
+
+func (e CmdError) Error() string {
+	return fmt.Sprintf("rc:%d stdout:%q stderr:%q", e.RC, e.Stdout, e.Stderr)
 }
 
 // Session allows for multiple commands to be run against an ssh connection
@@ -120,7 +126,7 @@ func DialAgent(server, username string, timeout int) (*Session, error) {
 	socket := os.Getenv("SSH_AUTH_SOCK")
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("can't connect to ssh-agent: %w", err)
 	}
 
 	agentClient := agent.NewClient(conn)
@@ -177,7 +183,6 @@ func NewSession(client *ssh.Client) (*Session, error) {
 	}
 
 	s := &Session{ssh: session, client: client}
-
 	return s, nil
 }
 
@@ -187,6 +192,7 @@ func (s *Session) Buffered() {
 	s.ssh.Stderr = &s.err
 }
 
+// Terminal emulates a terminal
 func (s *Session) Terminal() error {
 	// Set up terminal modes
 	modes := ssh.TerminalModes{
@@ -195,7 +201,7 @@ func (s *Session) Terminal() error {
 		ssh.TTY_OP_OSPEED: 115200, // output speed = 115.2kbps
 	}
 	// Request pseudo terminal
-	if err := s.ssh.RequestPty(termType, 80, 40, modes); err != nil {
+	if err := s.ssh.RequestPty("xterm", 80, 40, modes); err != nil {
 		s.client.Close()
 		return err
 	}
@@ -220,6 +226,7 @@ func ExecPassword(server, username, password, cmd string, timeout int) (Results,
 	if err != nil {
 		return Results{}, err
 	}
+	session.Buffered()
 	return Run(session, cmd)
 }
 
@@ -229,6 +236,7 @@ func ExecText(server, username, keytext, cmd string, timeout int) (Results, erro
 	if err != nil {
 		return Results{}, err
 	}
+	session.Buffered()
 	return Run(session, cmd)
 }
 
@@ -238,6 +246,7 @@ func ExecAgent(server, username, cmd string, timeout int) (Results, error) {
 	if err != nil {
 		return Results{}, err
 	}
+	session.Buffered()
 	return Run(session, cmd)
 }
 
@@ -288,7 +297,7 @@ func (s *Session) Copy(r io.Reader, filename, destination string, size int64, mo
 	w.Close()
 
 	err = <-errors
-	//int rc
+
 	if err == nil {
 		return nil
 	}
@@ -312,7 +321,7 @@ func (s *Session) Copy(r io.Reader, filename, destination string, size int64, mo
 			stdout = string(parts[0])
 			stdout = strings.TrimRight(stdout, "\n")
 		}
-		err = fmt.Errorf("rc:%d stdout:%q stderr:%q error:%w", rc, stdout, stderr, serr)
+		return CmdError{rc, stdout, stderr}
 	}
 	return err
 }

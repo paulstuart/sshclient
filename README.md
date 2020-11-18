@@ -1,4 +1,4 @@
-sshclient
+sshclient [![GoDoc](https://godoc.org/github.com/paulstuart/sshclient?status.svg)](http://godoc.org/github.com/paulstuart/sshclient)
 =========
 
-golang ssh client wrapper with timeout
+Simple golang ssh/scp client helpers
