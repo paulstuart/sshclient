@@ -55,7 +55,6 @@ func TestLocal(t *testing.T) {
 	timeout := 5
 	t.Logf("server port is: %d\n", testPort)
 	host := fmt.Sprintf("localhost:%d", testPort)
-	fmt.Println("exec ssh")
 	r, err := ExecPassword(host, testUsername, testPassword, cmd, timeout)
 	if err != nil {
 		t.Fatal("ssh connect error:", err)
@@ -78,11 +77,9 @@ func TestLocalError(t *testing.T) {
 	options := testOptions(t)
 	options.Exec = &MockHandler{RC: rc, Stdout: stdout, Stderr: stderr}
 	testServer(t, options)
-	fmt.Println("test server running")
 
 	timeout := 1
 	host := fmt.Sprintf("localhost:%d", testPort)
-	fmt.Println("exec ssh")
 	r, err := ExecPassword(host, testUsername, testPassword, cmd, timeout)
 	if err != nil {
 		if err, ok := err.(*ssh.ExitError); ok {
@@ -117,7 +114,6 @@ func TestLocalBash(t *testing.T) {
 
 	timeout := 1
 	host := fmt.Sprintf("localhost:%d", testPort)
-	fmt.Println("exec ssh")
 	r, err := ExecPassword(host, testUsername, testPassword, cmd, timeout)
 	if err != nil {
 		if err, ok := err.(*ssh.ExitError); ok {
@@ -140,10 +136,10 @@ func TestLocalBash(t *testing.T) {
 }
 
 func TestLocalBashError(t *testing.T) {
-	t.Skip("not yet")
+	//t.Skip("not yet")
 	cmd := "foo" // this should be an invalid command
-	stdout := "bash: foo: command not found"
-	stderr := ""
+	stdout := ""
+	stderr := "bash: foo: command not found\n"
 	rc := 127
 	options := testOptions(t)
 	options.Exec = &BashHandler{}

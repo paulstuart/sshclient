@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/kr/pty"
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/term"
 )
 
 type Logger interface {
@@ -83,25 +81,17 @@ func (m *BashHandler) Exec(cmd string) (int, error) {
 	basher.Stdout = m.ch
 	basher.Stderr = m.ch.Stderr()
 
-	bashf, err := pty.Start(basher)
+	_, err := pty.Start(basher)
 	if err != nil {
 		return 0, fmt.Errorf("could not start pty: %w", err)
 	}
-	if false {
-		fmt.Printf("BASHF: %+v\n", *bashf)
-		term.MakeRaw(int(bashf.Fd()))
-	}
 
-	log.Println("wait for process to end")
-	defer log.Println("bash is done")
-
-	_, err = basher.Process.Wait()
+	status, err := basher.Process.Wait()
 	if err != nil {
-		log.Printf("bash exit error (%T): %+v\n", err, err)
 		return basher.ProcessState.ExitCode(), fmt.Errorf("bash wait error: %w", err)
 	}
 
-	return 0, nil
+	return status.ExitCode(), nil
 
 }
 
@@ -115,7 +105,6 @@ type execMsg struct {
 }
 
 func FakeServer(options *ServerOptions) (func(), error) {
-	fmt.Printf("OPTIONS: %+v\n", options)
 	if options.Exec == nil {
 		options.Exec = &EchoHandler{}
 	}
@@ -172,6 +161,8 @@ func FakeServer(options *ServerOptions) (func(), error) {
 		config.AddHostKey(private)
 	}
 
+	// to ensure we can start, by default we'll expect no port to be specified
+	// to avoid port conflicts, so we bind to :0 and report back the port chosen
 	var listenPort int
 	if options.Port == nil {
 		options.Port = &listenPort
@@ -193,17 +184,17 @@ func FakeServer(options *ServerOptions) (func(), error) {
 				if !listening {
 					break
 				}
-				log.Printf("Failed to accept incoming connection (%s)", err)
+				options.Logger.Logf("Failed to accept incoming connection (%s)", err)
 				continue
 			}
 			// Before use, a handshake must be performed on the incoming net.Conn.
 			sshConn, chans, reqs, err := ssh.NewServerConn(tcpConn, config)
 			if err != nil {
-				log.Printf("Failed to handshake (%s)", err)
+				options.Logger.Logf("Failed to handshake (%s)", err)
 				continue
 			}
 
-			log.Printf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
+			options.Logger.Logf("New SSH connection from %s (%s)", sshConn.RemoteAddr(), sshConn.ClientVersion())
 			// Discard all global out-of-band Requests
 			go ssh.DiscardRequests(reqs)
 			// Accept all channels
@@ -304,22 +295,21 @@ func handleChannel(newChannel ssh.NewChannel, hndlr ExecHandler, logger Logger) 
 				*/
 			case "exec":
 				cmd := string(req.Payload[4:])
-				log.Println("exec command:", cmd)
 				rc, err := hndlr.Exec(cmd)
 				if err != nil {
-					log.Printf("handler exec error: %v\n", err)
+					logger.Logf("handler exec error: %v\n", err)
 					actionOk = false
 				}
-				log.Printf("exec rc: %d\n", rc)
+				logger.Logf("exec rc: %d\n", rc)
 				_, err = connection.SendRequest("exit-status", false, []byte{0, 0, 0, byte(rc)})
 				if err != nil {
-					log.Printf("SendRequest error: %+v", err)
+					logger.Logf("SendRequest error: %+v", err)
 				}
 				req.Reply(actionOk, nil)
 				connection.Close()
 
 			default:
-				log.Println("unhandled request type:", req.Type)
+				logger.Logf("unhandled request type: %s\n", req.Type)
 			}
 			if req.WantReply {
 				req.Reply(actionOk, nil)
