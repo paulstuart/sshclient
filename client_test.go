@@ -8,6 +8,13 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/joho/godotenv"
+)
+
+const (
+	DefaultEnvFile = "testing.env"
+	EnvFileEnv     = "ENV_FILE" // to override DefaultEnvFile
 )
 
 var (
@@ -16,28 +23,34 @@ var (
 
 // Using envs to avoid accidentally baking creds into code
 func init() {
+	envFile := os.Getenv(EnvFileEnv)
+	if envFile == "" {
+		envFile = DefaultEnvFile
+	}
+	_ = godotenv.Load(envFile)
+
 	host = os.Getenv("SSH_HOST")
-	if len(host) == 0 {
+	if host == "" {
 		panic("Error: SSH_HOST not set")
 	}
 
 	username = os.Getenv("SSH_USERNAME")
-	if len(username) == 0 {
+	if username == "" {
 		panic("Error: SSH_USERNAME not set")
 	}
 
 	password = os.Getenv("SSH_PASSWORD")
-	if len(password) == 0 {
+	if password == "" {
 		panic("Error: SSH_PASSWORD not set")
 	}
 
 	keyfile = os.Getenv("SSH_PRIVATE")
-	if len(keyfile) == 0 {
+	if keyfile == "" {
 		panic("Error: SSH_PRIVATE not set (private keyfile)")
 	}
 
 	keytext = os.Getenv("SSH_KEY")
-	if len(keyfile) == 0 {
+	if keyfile == "" {
 		panic("Error: SSH_KEY not set (private key variable)")
 	}
 }
