@@ -12,20 +12,23 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/kr/pty"
+	"github.com/creack/pty"
 	"golang.org/x/crypto/ssh"
 )
 
+// Logger accomodates testing.T as a logger
 type Logger interface {
 	Log(...interface{})
 	Logf(string, ...interface{})
 }
 
+// ExecHandler abstracts handling of ssh "exec"
 type ExecHandler interface {
 	Exec(string) (int, error)
 	SetChannel(ssh.Channel)
 }
 
+// ServerOptions control the ssh server behavior
 type ServerOptions struct {
 	Hostname string
 	Username string
@@ -37,6 +40,7 @@ type ServerOptions struct {
 	Exec     ExecHandler
 }
 
+// MockHandler allows faking expected behavior
 type MockHandler struct {
 	RC     int
 	Stdout string
@@ -44,37 +48,45 @@ type MockHandler struct {
 	ch     ssh.Channel
 }
 
+// SetChannel makes this an ExecHandler
 func (m *MockHandler) SetChannel(ch ssh.Channel) {
 	m.ch = ch
 }
 
+// Exec makes this an ExecHandler
 func (m *MockHandler) Exec(_ string) (int, error) {
 	fmt.Fprint(m.ch, m.Stdout)
 	fmt.Fprint(m.ch.Stderr(), m.Stderr)
 	return m.RC, nil
 }
 
+// EchoHandler is the default dummy handler
 type EchoHandler struct {
 	ch ssh.Channel
 }
 
+// SetChannel makes this an ExecHandler
 func (m *EchoHandler) SetChannel(ch ssh.Channel) {
 	m.ch = ch
 }
 
+// Exec makes this an ExecHandler
 func (m *EchoHandler) Exec(cmd string) (int, error) {
 	fmt.Fprintf(m.ch, "command is: %q", cmd)
 	return 0, nil
 }
 
+// BashHandler runs a command in bash
 type BashHandler struct {
 	ch ssh.Channel
 }
 
+// SetChannel makes this an ExecHandler
 func (m *BashHandler) SetChannel(ch ssh.Channel) {
 	m.ch = ch
 }
 
+// Exec makes this an ExecHandler
 func (m *BashHandler) Exec(cmd string) (int, error) {
 	basher := exec.Command("bash", "--noprofile", "--norc", "-c", cmd)
 
@@ -97,14 +109,14 @@ func (m *BashHandler) Exec(cmd string) (int, error) {
 
 type nonlLogger struct{}
 
-func (_ nonlLogger) Log(_ ...interface{})            {}
-func (_ nonlLogger) Logf(_ string, _ ...interface{}) {}
+// Log makes this a Logger
+func (n nonlLogger) Log(_ ...interface{}) {}
 
-type execMsg struct {
-	Command string
-}
+// Logf makes this a Logger
+func (n nonlLogger) Logf(_ string, _ ...interface{}) {}
 
-func FakeServer(options *ServerOptions) (func(), error) {
+// Server is a fake ssh server for unit testing
+func Server(options *ServerOptions) (func(), error) {
 	if options.Exec == nil {
 		options.Exec = &EchoHandler{}
 	}
@@ -236,49 +248,13 @@ func handleChannel(newChannel ssh.NewChannel, hndlr ExecHandler, logger Logger) 
 	}
 	hndlr.SetChannel(connection)
 
-	/**
-
-	// Fire up bash for this session
-	bash := exec.Command("bash")
-
-	// Prepare teardown function
-	close := func() {
-		connection.Close()
-		_, err := bash.Process.Wait()
-		if err != nil {
-			logger.Logf("Failed to exit bash (%s)", err)
-		}
-		log.Printf("Session closed")
-	}
-
-	// Allocate a terminal for this channel
-	log.Print("Creating pty...")
-	bashf, err := pty.Start(bash)
-	if err != nil {
-		log.Printf("Could not start pty (%s)", err)
-		close()
-		return
-	}
-
-	//pipe session to bash and visa-versa
-	var once sync.Once
-	go func() {
-		io.Copy(connection, bashf)
-		once.Do(close)
-	}()
-	go func() {
-		io.Copy(bashf, connection)
-		once.Do(close)
-	}()
-	**/
-
 	// Sessions have out-of-band requests such as "shell", "pty-req" and "env"
 	go func() {
 		for req := range requests {
 			actionOk := true
 			switch req.Type {
 			case "shell":
-				// We only accept the default shell
+				//  only accept the default shell,
 				// (i.e. no command in the Payload)
 				actionOk = len(req.Payload) == 0
 				/*
@@ -319,16 +295,12 @@ func handleChannel(newChannel ssh.NewChannel, hndlr ExecHandler, logger Logger) 
 	}()
 }
 
-// =======================
-
 // parseDims extracts terminal dimensions (width x height) from the provided buffer.
 func parseDims(b []byte) (uint32, uint32) {
 	w := binary.BigEndian.Uint32(b)
 	h := binary.BigEndian.Uint32(b[4:])
 	return w, h
 }
-
-// ======================
 
 // Winsize stores the Height and Width of a terminal.
 type Winsize struct {

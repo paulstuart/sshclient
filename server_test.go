@@ -1,6 +1,3 @@
-// build notready
-
-// adapted from https://gist.github.com/jpillora/b480fde82bff51a06238
 package sshclient
 
 import (
@@ -13,21 +10,18 @@ import (
 )
 
 const (
-	testUsername    = "joebob"
-	testPassword    = "howdy!"
-	defaultTestPort = 12200
+	testUsername = "joebob"
+	testPassword = "howdy!"
 )
 
 var (
-	tempDir     string
-	testPort    int
-	testKeyFile = "~/.ssh/id_rsa"
+	testPort int
 )
 
 func testOptions(t *testing.T) *ServerOptions {
 	return &ServerOptions{
-		Username: "joebob",
-		Password: "howdy!",
+		Username: testUsername,
+		Password: testPassword,
 		Port:     &testPort,
 		Logger:   t,
 		KeyFile:  "~/.ssh/id_rsa",
@@ -39,7 +33,7 @@ func testServer(t *testing.T, options *ServerOptions) {
 	if options == nil {
 		options = testOptions(t)
 	}
-	close, err := FakeServer(options)
+	close, err := Server(options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +42,6 @@ func testServer(t *testing.T, options *ServerOptions) {
 }
 
 func TestLocal(t *testing.T) {
-	//t.Skip("fix test server")
 	testServer(t, nil)
 
 	cmd := "hostname"
@@ -69,7 +62,6 @@ func TestLocal(t *testing.T) {
 }
 
 func TestLocalError(t *testing.T) {
-	//t.Skip("fix test server")
 	cmd := "foo" // command is ignored, so what ev er
 	stdout := "meh"
 	stderr := "we have a failure to communicate"
@@ -100,8 +92,7 @@ func TestLocalError(t *testing.T) {
 }
 
 func TestLocalBash(t *testing.T) {
-	//t.Skip("not yet")
-	cmd := "hostname" // command is ignored, so what ev er
+	cmd := "hostname"
 	stdout, err := os.Hostname()
 	if err != nil {
 		t.Fatalf("error getting hostname: %+v\n", err)
@@ -136,7 +127,6 @@ func TestLocalBash(t *testing.T) {
 }
 
 func TestLocalBashError(t *testing.T) {
-	//t.Skip("not yet")
 	cmd := "foo" // this should be an invalid command
 	stdout := ""
 	stderr := "bash: foo: command not found\n"
