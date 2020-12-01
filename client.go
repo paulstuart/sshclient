@@ -11,6 +11,7 @@ import (
 	"io/ioutil"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -35,11 +36,18 @@ func (e CmdError) Error() string {
 	return fmt.Sprintf("rc:%d stdout:%q stderr:%q", e.RC, e.Stdout, e.Stderr)
 }
 
-// Session allows for multiple commands to be run against an ssh connection
-type Session struct {
+// Connection allows for multiple commands to be run against an ssh connection
+type Connection struct {
 	client   *ssh.Client
 	ssh      *ssh.Session
 	out, err bytes.Buffer
+}
+
+// NewSesson creates a new session for the connection
+func (s *Connection) NewSession() error {
+	var err error
+	s.ssh, err = s.client.NewSession()
+	return err
 }
 
 type keychain struct {
@@ -47,7 +55,7 @@ type keychain struct {
 }
 
 // Close closes the ssh session
-func (s *Session) Close() {
+func (s *Connection) Close() {
 	s.ssh.Close()
 	if s.client != nil {
 		s.client.Close()
@@ -55,13 +63,13 @@ func (s *Session) Close() {
 }
 
 // Clear clears the stdout and stderr buffers
-func (s *Session) Clear() {
+func (s *Connection) Clear() {
 	s.out.Reset()
 	s.err.Reset()
 }
 
 // Shell opens an command shell on the remote host
-func (s *Session) Shell() error {
+func (s *Connection) Shell() error {
 	return s.ssh.Shell()
 }
 
@@ -82,15 +90,15 @@ func (k *keychain) PrivateKeyFile(file string) error {
 	return k.PrivateKey(buf)
 }
 
-func keyAuth(key string) (ssh.AuthMethod, error) {
+func AuthKeyBytes(key []byte) (ssh.AuthMethod, error) {
 	k := new(keychain)
-	if err := k.PrivateKey([]byte(key)); err != nil {
+	if err := k.PrivateKey(key); err != nil {
 		return nil, err
 	}
 	return ssh.PublicKeys(k.keys...), nil
 }
 
-func keyFileAuth(file string) (ssh.AuthMethod, error) {
+func AuthKeyFile(file string) (ssh.AuthMethod, error) {
 	k := new(keychain)
 	if err := k.PrivateKeyFile(file); err != nil {
 		return nil, err
@@ -98,9 +106,13 @@ func keyFileAuth(file string) (ssh.AuthMethod, error) {
 	return ssh.PublicKeys(k.keys...), nil
 }
 
+func AuthPassword(password string) (ssh.AuthMethod, error) {
+	return ssh.Password(password), nil
+}
+
 //DialKey will open an ssh session using a private key
-func DialKey(server, username, key string, timeout int) (*Session, error) {
-	auth, err := keyAuth(key)
+func DialKey(server, username string, key []byte, timeout int) (*Connection, error) {
+	auth, err := AuthKeyBytes(key)
 	if err != nil {
 		return nil, err
 	}
@@ -108,8 +120,8 @@ func DialKey(server, username, key string, timeout int) (*Session, error) {
 }
 
 //DialKeyFile will open an ssh session using an key key stored in keyfile
-func DialKeyFile(server, username, keyfile string, timeout int) (*Session, error) {
-	auth, err := keyFileAuth(keyfile)
+func DialKeyFile(server, username, keyfile string, timeout int) (*Connection, error) {
+	auth, err := AuthKeyFile(keyfile)
 	if err != nil {
 		return nil, err
 	}
@@ -117,12 +129,12 @@ func DialKeyFile(server, username, keyfile string, timeout int) (*Session, error
 }
 
 //DialPassword will open an ssh session using the specified password
-func DialPassword(server, username, password string, timeout int) (*Session, error) {
+func DialPassword(server, username, password string, timeout int) (*Connection, error) {
 	return DialSSH(server, username, timeout, ssh.Password(password))
 }
 
 // DialAgent makes a ssh connection with credentials from ssh-agent
-func DialAgent(server, username string, timeout int) (*Session, error) {
+func DialAgent(server, username string, timeout int) (*Connection, error) {
 	socket := os.Getenv("SSH_AUTH_SOCK")
 	conn, err := net.Dial("unix", socket)
 	if err != nil {
@@ -145,7 +157,7 @@ func DialAgent(server, username string, timeout int) (*Session, error) {
 }
 
 //DialConfigSSH will open an ssh session using the given config
-func DialConfigSSH(server, username string, config *ssh.ClientConfig) (*Session, error) {
+func DialConfigSSH(server, username string, config *ssh.ClientConfig) (*Connection, error) {
 	if !strings.Contains(server, ":") {
 		server += ":22"
 	}
@@ -162,7 +174,7 @@ func DialConfigSSH(server, username string, config *ssh.ClientConfig) (*Session,
 }
 
 //DialSSH will open an ssh session using the specified authentication
-func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Session, error) {
+func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Connection, error) {
 	if len(auth) == 0 {
 		panic("no auth!")
 	}
@@ -176,24 +188,24 @@ func DialSSH(server, username string, timeout int, auth ...ssh.AuthMethod) (*Ses
 }
 
 // NewSession will open an ssh session using the provided connection
-func NewSession(client *ssh.Client) (*Session, error) {
+func NewSession(client *ssh.Client) (*Connection, error) {
 	session, err := client.NewSession()
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Session{ssh: session, client: client}
+	s := &Connection{ssh: session, client: client}
 	return s, nil
 }
 
 // Buffered insures that command output is captured
-func (s *Session) Buffered() {
+func (s *Connection) Buffered() {
 	s.ssh.Stdout = &s.out
 	s.ssh.Stderr = &s.err
 }
 
 // Terminal emulates a terminal
-func (s *Session) Terminal() error {
+func (s *Connection) Terminal() error {
 	// Set up terminal modes
 	modes := ssh.TerminalModes{
 		ssh.ECHO:          0,      // disable echoing
@@ -209,7 +221,7 @@ func (s *Session) Terminal() error {
 }
 
 // Run will run a command in the session
-func Run(session *Session, cmd string) (Results, error) {
+func Run(session *Connection, cmd string) (Results, error) {
 	var rc int
 	var err error
 	if err = session.ssh.Run(cmd); err != nil {
@@ -231,8 +243,8 @@ func ExecPassword(server, username, password, cmd string, timeout int) (Results,
 }
 
 // ExecText will run a single command using the given key
-func ExecText(server, username, keytext, cmd string, timeout int) (Results, error) {
-	session, err := DialKey(server, username, keytext, timeout)
+func ExecText(server, username, cmd string, keybytes []byte, timeout int) (Results, error) {
+	session, err := DialKey(server, username, keybytes, timeout)
 	if err != nil {
 		return Results{}, err
 	}
@@ -251,33 +263,33 @@ func ExecAgent(server, username, cmd string, timeout int) (Results, error) {
 }
 
 // CopyFile scp's filename to dest on the remote host
-func (s *Session) CopyFile(filename, dest string) error {
+func (s *Connection) CopyFile(filename, dest string) error {
 	info, err := os.Stat(filename)
 	if err != nil {
 		return err
 	}
 	f, err := os.Open(filename)
 	if err != nil {
-		return err
+		return fmt.Errorf("can't open %q -- %w", filename, err)
 	}
 	defer f.Close()
-	return s.Copy(f, filename, dest, info.Size(), info.Mode())
+	return s.Copy(f, filepath.Base(filename), dest, info.Size(), info.Mode())
 }
 
-// Copy scp's the reader contents named filename to dest on the remote host
-func (s *Session) Copy(r io.Reader, filename, destination string, size int64, mode os.FileMode) error {
+// Copy scp's the reader contents to filename on the remote host
+func (s *Connection) Copy(r io.Reader, filename, dest string, size int64, mode os.FileMode) error {
 	w, err := s.ssh.StdinPipe()
 	if err != nil {
 		return err
 	}
 
-	// capture stderr
+	// capture stdout & stderr for feedback on remote errors
 	s.Buffered()
 
-	cmd := fmt.Sprintf("/usr/bin/env scp -tq %s", destination)
+	cmd := fmt.Sprintf("/usr/bin/env scp -tq %s", dest)
 	if err := s.ssh.Start(cmd); err != nil {
 		w.Close()
-		return err
+		return fmt.Errorf("start failed: %w", err)
 	}
 
 	errors := make(chan error)
@@ -288,9 +300,9 @@ func (s *Session) Copy(r io.Reader, filename, destination string, size int64, mo
 
 	// send the SCP Create command
 	fmt.Fprintf(w, "C%#o %d %s\n", mode, size, filename)
-	if _, err := io.Copy(w, r); err != nil {
+	if n, err := io.Copy(w, r); err != nil && err != io.EOF {
 		w.Close()
-		return fmt.Errorf("copy error: %w", err)
+		return fmt.Errorf("copy %d with error: %w", n, err)
 	}
 	// send end of command marker
 	fmt.Fprint(w, "\x00")
@@ -324,4 +336,10 @@ func (s *Session) Copy(r io.Reader, filename, destination string, size int64, mo
 		return CmdError{rc, stdout, stderr}
 	}
 	return err
+}
+
+// Exec will run a single command in this session
+func (s *Connection) Exec(cmd string) (Results, error) {
+	s.Buffered()
+	return Run(s, cmd)
 }

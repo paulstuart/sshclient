@@ -18,7 +18,8 @@ const (
 )
 
 var (
-	host, username, password, keyfile, keytext string
+	host, username, password, keyfile string
+	keybytes                          []byte
 )
 
 // Using envs to avoid accidentally baking creds into code
@@ -49,14 +50,14 @@ func init() {
 		panic("Error: SSH_PRIVATE not set (private keyfile)")
 	}
 
-	keytext = os.Getenv("SSH_KEY")
+	keybytes = []byte(os.Getenv("SSH_KEY"))
 	if keyfile == "" {
 		panic("Error: SSH_KEY not set (private key variable)")
 	}
 }
 
 func TestSSHKey(t *testing.T) {
-	keyauth, err := keyFileAuth(keyfile)
+	keyauth, err := AuthKeyFile(keyfile)
 	if err != nil {
 		t.Fatal("keyauth error:", err)
 	}
@@ -73,7 +74,7 @@ func TestSSHKey(t *testing.T) {
 
 func TestSSHKeyAuth(t *testing.T) {
 	t.Skip("bad envs?")
-	client, err := DialKey(host, username, keytext, 5)
+	client, err := DialKey(host, username, keybytes, 5)
 	if err != nil {
 		t.Fatal("key auth dial error:", err)
 	}
@@ -110,7 +111,7 @@ func TestSSHKeyFileAuth(t *testing.T) {
 func TestSSHAgent(t *testing.T) {
 	client, err := DialAgent(host, username, 5)
 	if err != nil {
-		t.Fatal("agent dial error:", err)
+		t.Fatalf("agent dial error for host %q: %v", host, err)
 	}
 	client.Buffered()
 
@@ -169,8 +170,8 @@ func TestSSHTimeout(t *testing.T) {
 
 // TODO: makr this test (and others) self contained with a test ssh server
 const (
-	scpTestFile = "_TESTING_SCP_.txt"
-	scpTestDir  = "/tmp/foo"
+	scpTestFile = "testdata/arewethereyet.txt"
+	scpTestDir  = "/tmp"
 )
 
 func TestSCP(t *testing.T) {
